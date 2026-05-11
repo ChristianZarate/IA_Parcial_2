@@ -1,143 +1,158 @@
-# Acondicionamiento del Corte (Cutset Conditioning)
-# Técnica que explota la estructura del grafo de restricciones.
-# Si se elimina un conjunto de variables (cutset), el grafo restante
-# se vuelve un árbol, resoluble en tiempo lineal.
-# Estrategia: instanciar todas las combinaciones del cutset y resolver el árbol.
+"""
+22 - Búsqueda Local: Mínimos-Conflictos (Min-Conflicts)
+=========================================================
+Algoritmo de búsqueda local para CSPs.
+- Parte de una asignación completa (puede tener conflictos).
+- En cada paso escoge una variable conflictiva al azar y le
+  asigna el valor que minimice el número de conflictos.
+- Muy eficiente en problemas grandes (e.g. N-Reinas).
+"""
 
-class CSP:
-    def __init__(self, variables, dominios, vecinos, restriccion_fn):
-        self.variables = variables
-        self.dominios = {v: list(d) for v, d in dominios.items()}
-        self.vecinos = vecinos
-        self.restriccion = restriccion_fn
-
-    def es_consistente_asignacion(self, var, val, asignacion):
-        for vecino in self.vecinos.get(var, []):
-            if vecino in asignacion:
-                if not self.restriccion(var, val, vecino, asignacion[vecino]):
-                    return False
-        return True
+import random
 
 
-def encontrar_cutset_simple(variables, vecinos):
+# ─────────────────────────── utilidades ────────────────────────────
+
+def contar_conflictos(asignacion, var, valor, restricciones):
+    """Cuenta cuántas restricciones viola 'var=valor' con la asignación actual."""
+    conflictos = 0
+    for (v1, v2), restriccion in restricciones.items():
+        if v1 == var and v2 in asignacion:
+            if not restriccion(valor, asignacion[v2]):
+                conflictos += 1
+        elif v2 == var and v1 in asignacion:
+            if not restriccion(asignacion[v1], valor):
+                conflictos += 1
+    return conflictos
+
+
+def variables_conflictivas(asignacion, restricciones):
+    """Devuelve lista de variables que tienen al menos un conflicto."""
+    conflictivas = []
+    for var in asignacion:
+        if contar_conflictos(asignacion, var, asignacion[var], restricciones) > 0:
+            conflictivas.append(var)
+    return conflictivas
+
+
+# ──────────────────────── algoritmo principal ────────────────────────
+
+def min_conflicts(variables, dominios, restricciones, max_pasos=1000):
     """
-    Heurística simple: elige nodos de mayor grado hasta que el grafo sea un árbol.
-    Un grafo es árbol si |aristas| == |nodos| - 1 y está conectado.
+    Búsqueda Local por Mínimos-Conflictos.
+    Retorna asignación solución o None si no la encontró.
     """
-    # Para simplificar, usamos un cutset manual basado en el ejemplo
-    # En la práctica se usa algoritmos de ciclos (DFS con back-edges)
-    cutset = []
-    aristas = set()
-    for v in variables:
-        for u in vecinos.get(v, []):
-            aristas.add(frozenset([v, u]))
+    # 1. Asignación inicial aleatoria completa
+    asignacion = {v: random.choice(dominios[v]) for v in variables}
 
-    n = len(variables)
-    a = len(aristas)
+    for paso in range(max_pasos):
+        # 2. Comprobar si es solución
+        conflictivas = variables_conflictivas(asignacion, restricciones)
+        if not conflictivas:
+            print(f"  ✓ Solución encontrada en el paso {paso}.")
+            return asignacion
 
-    print(f"Grafo original: {n} nodos, {a} aristas")
-    print(f"Para ser árbol necesita {n-1} aristas, tiene {a} -> ciclos: {a - (n-1)}\n")
+        # 3. Elegir variable conflictiva al azar
+        var = random.choice(conflictivas)
 
-    # Detección simple: nodos que forman ciclos (nodos con grado >= 2 y en ciclo)
-    # Aquí devolvemos un cutset precomputado para el ejemplo
-    return cutset
+        # 4. Asignar valor con menos conflictos
+        min_conf = float('inf')
+        mejores_valores = []
+        for valor in dominios[var]:
+            c = contar_conflictos(asignacion, var, valor, restricciones)
+            if c < min_conf:
+                min_conf = c
+                mejores_valores = [valor]
+            elif c == min_conf:
+                mejores_valores.append(valor)
+
+        asignacion[var] = random.choice(mejores_valores)
+
+    print("  ✗ No se encontró solución dentro del límite de pasos.")
+    return None
 
 
-def resolver_arbol(csp, orden, asignacion_fija):
+# ──────────────────────── N-Reinas (demo) ────────────────────────────
+
+def demo_n_reinas(n=8):
     """
-    Resuelve un CSP con estructura de árbol mediante propagación hacia adelante y hacia atrás.
-    orden: lista de variables en orden topológico.
+    Problema de las N-Reinas usando Min-Conflicts.
+    Variables: columnas (0..n-1); valor = fila donde está la reina.
+    Restricción: ninguna reina comparte fila ni diagonal.
     """
-    asignacion = dict(asignacion_fija)
+    print(f"\n{'='*50}")
+    print(f"  Problema de las {n}-Reinas")
+    print(f"{'='*50}")
 
-    for var in orden:
-        if var in asignacion:
-            continue
-        asignado = False
-        for valor in csp.dominios[var]:
-            if csp.es_consistente_asignacion(var, valor, asignacion):
-                asignacion[var] = valor
-                asignado = True
-                break
-        if not asignado:
-            return None
+    variables = list(range(n))
+    dominios  = {v: list(range(n)) for v in variables}
 
-    return asignacion
+    # Restricción: para columnas c1 y c2, las reinas no deben atacarse
+    def no_ataca(fila1, fila2, col1=None, col2=None):
+        # Se llamará con el índice de columna capturado en el closure
+        return True  # placeholder; usamos versión con closure abajo
 
+    restricciones = {}
+    for c1 in range(n):
+        for c2 in range(c1 + 1, n):
+            def hacer_restriccion(col1, col2):
+                def restriccion(f1, f2):
+                    return f1 != f2 and abs(f1 - f2) != abs(col1 - col2)
+                return restriccion
+            restricciones[(c1, c2)] = hacer_restriccion(c1, c2)
 
-def backtracking_cutset(csp, cutset, resto, intentos=None):
-    """Itera sobre asignaciones del cutset y resuelve el árbol residual."""
-    if intentos is None:
-        intentos = [0]
-
-    def instanciar(idx, asignacion_cutset):
-        if idx == len(cutset):
-            intentos[0] += 1
-            print(f"  Intento {intentos[0]}: cutset={asignacion_cutset}")
-
-            solucion = resolver_arbol(csp, resto, asignacion_cutset)
-            if solucion:
-                return solucion
-            return None
-
-        var = cutset[idx]
-        for valor in csp.dominios[var]:
-            nueva = dict(asignacion_cutset)
-            nueva[var] = valor
-            # Verificar consistencia dentro del cutset
-            ok = all(
-                csp.restriccion(var, valor, v2, v2_val)
-                for v2, v2_val in nueva.items()
-                if v2 != var and v2 in csp.vecinos.get(var, [])
-            )
-            if ok:
-                resultado = instanciar(idx + 1, nueva)
-                if resultado:
-                    return resultado
-        return None
-
-    return instanciar(0, {})
-
-
-if __name__ == "__main__":
-    # Ejemplo: grafo con un ciclo, que se puede romper con 1 variable (cutset)
-    # Coloreo de 4 nodos en ciclo: A-B-C-D-A (necesita cutset de tamaño 1)
-    variables = ['A', 'B', 'C', 'D']
-    colores = ['R', 'G', 'B']
-    dominios = {v: colores[:] for v in variables}
-    vecinos = {
-        'A': ['B', 'D'],
-        'B': ['A', 'C'],
-        'C': ['B', 'D'],
-        'D': ['A', 'C']
-    }
-
-    def diferente(v1, c1, v2, c2):
-        return c1 != c2
-
-    csp = CSP(variables, dominios, vecinos, diferente)
-
-    print("=== Acondicionamiento del Corte (Cutset Conditioning) ===")
-    print("Grafo: ciclo A-B-C-D-A | Colores: R, G, B\n")
-
-    encontrar_cutset_simple(variables, vecinos)
-
-    # Cutset: {A} -> rompe el ciclo, resto {B, C, D} forma un árbol (camino B-C-D)
-    cutset = ['A']
-    resto = ['B', 'C', 'D']
-    print(f"Cutset seleccionado: {cutset}")
-    print(f"Árbol residual: {resto}\n")
-
-    solucion = backtracking_cutset(csp, cutset, resto)
+    solucion = min_conflicts(variables, dominios, restricciones, max_pasos=10_000)
 
     if solucion:
-        print(f"\nSolución encontrada:")
-        for v in variables:
-            print(f"  {v}: {solucion[v]}")
-        print("\nVerificación de restricciones:")
-        for v in variables:
-            for u in vecinos[v]:
-                ok = solucion[v] != solucion[u]
-                print(f"  {v}({solucion[v]}) != {u}({solucion[u]}) -> {'OK' if ok else 'FALLO'}")
-    else:
-        print("Sin solución.")
+        # Imprimir tablero
+        tablero = [['.' for _ in range(n)] for _ in range(n)]
+        for col, fila in solucion.items():
+            tablero[fila][col] = 'Q'
+        print()
+        for fila in tablero:
+            print("  " + " ".join(fila))
+        print()
+
+
+# ──────────────────────── demo coloreado de mapa ─────────────────────
+
+def demo_coloreo_mapa():
+    """
+    Coloreo del mapa de Australia (WA, NT, SA, Q, NSW, V, T).
+    Restricción: territorios adyacentes deben tener diferente color.
+    """
+    print(f"\n{'='*50}")
+    print("  Coloreo de Mapa — Australia")
+    print(f"{'='*50}")
+
+    variables = ['WA', 'NT', 'SA', 'Q', 'NSW', 'V', 'T']
+    colores = ['Rojo', 'Verde', 'Azul']
+    dominios = {v: colores[:] for v in variables}
+
+    adyacencias = [
+        ('WA', 'NT'), ('WA', 'SA'),
+        ('NT', 'SA'), ('NT', 'Q'),
+        ('SA', 'Q'),  ('SA', 'NSW'), ('SA', 'V'),
+        ('Q', 'NSW'), ('NSW', 'V'),
+    ]
+
+    restricciones = {}
+    for v1, v2 in adyacencias:
+        restricciones[(v1, v2)] = lambda c1, c2: c1 != c2
+
+    solucion = min_conflicts(variables, dominios, restricciones, max_pasos=1000)
+
+    if solucion:
+        print()
+        for var, color in solucion.items():
+            print(f"  {var:4s} → {color}")
+        print()
+
+
+# ─────────────────────────────── main ────────────────────────────────
+
+if __name__ == "__main__":
+    random.seed(42)
+    demo_n_reinas(8)
+    demo_coloreo_mapa()
+
